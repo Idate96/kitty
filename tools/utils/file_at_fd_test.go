@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"bytes"
 	"context"
 	"io/fs"
 	"os"
@@ -767,6 +766,3 @@ func TestRefCountedFile(t *testing.T) {
 	// Final Unref should close the file.
 	ref2.Unref()
 }
-
-// Ensure bytes is used (avoids "imported and not used" in case of future edits).
-var _ = bytes.NewBuffer
