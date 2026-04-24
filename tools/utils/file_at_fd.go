@@ -434,6 +434,7 @@ func CopyFolderContents(ctx context.Context, src_folder *os.File, dest_folder *o
 			if v == nil {
 				break
 			}
+			queue.Remove(v)
 			item := v.Value.(*item)
 
 			if item.src_parent != nil {
@@ -484,7 +485,7 @@ func CopyFolderContents(ctx context.Context, src_folder *os.File, dest_folder *o
 					if err != nil {
 						return fail(err)
 					}
-					df, err := OpenAt(dest.File(), child.Name())
+					df, err := CreateAt(dest.File(), child.Name())
 					if err != nil {
 						sf.Close()
 						return fail(err)
