@@ -82,7 +82,7 @@ func CreateAt(dirFile *os.File, name string) (*os.File, error) {
 // permissions, matching the behavior of CreateAt().
 func CreateDirAt(parent *os.File, name string, permissions os.FileMode) (*os.File, error) {
 	if err := MkdirAt(parent, name, permissions); err != nil {
-		if err == unix.EEXIST {
+		if errors.Is(err, unix.EEXIST) {
 			return OpenDirAt(parent, name)
 		}
 		return nil, err
@@ -436,7 +436,7 @@ func CopyFolderContents(ctx context.Context, src_folder *os.File, dest_folder *o
 		if s, err := src_folder.Stat(); err != nil {
 			return err
 		} else {
-			seen_map[get_dir_ident(s)] = src_folder.Name()
+			seen_map[get_dir_ident(s)] = dest_folder.Name()
 		}
 	}
 	if is_ok == nil {
@@ -519,7 +519,7 @@ func CopyFolderContents(ctx context.Context, src_folder *os.File, dest_folder *o
 				if err != nil {
 					return fail(err)
 				}
-				df, err := CreateDirAt(dest.File(), child.Name(), child.Mode().Perm())
+				df, err := CreateAt(dest.File(), child.Name())
 				if err != nil {
 					sf.Close()
 					return fail(err)
@@ -528,7 +528,7 @@ func CopyFolderContents(ctx context.Context, src_folder *os.File, dest_folder *o
 					UnlinkAt(dest.File(), child.Name()) // dont leave partially copied files around
 					return fail(err)
 				}
-				if !mark_as_seen(dest.File(), df.Name(), df) {
+				if !mark_as_seen(dest.File(), child.Name(), nil) {
 					return false
 				}
 			case t&os.ModeSymlink != 0:
@@ -544,13 +544,19 @@ func CopyFolderContents(ctx context.Context, src_folder *os.File, dest_folder *o
 					}
 					pdf := os.NewFile(uintptr(pfd), parent_dir)
 					child_name := filepath.Base(rpath)
-					defer pdf.Close()
 					st, err := StatAt(pdf, child_name)
 					if err != nil {
+						pdf.Close()
 						return do_one_child(src, dest, child, true)
+					}
+					// StatAt sets Name to the full path; use just the base name so that
+					// subsequent *At calls treat it as a relative name under pdf.
+					if ui, ok := st.(*UnixFileInfo); ok {
+						ui.name = child_name
 					}
 					id := get_dir_ident(st)
 					if existing_path, found := seen_map[id]; found {
+						pdf.Close()
 						target, err := filepath.Rel(dest.File().Name(), existing_path)
 						if err != nil {
 							return do_one_child(src, dest, child, true)
@@ -561,8 +567,12 @@ func CopyFolderContents(ctx context.Context, src_folder *os.File, dest_folder *o
 						if !mark_as_seen(dest.File(), child.Name(), nil) {
 							return false
 						}
+						return true
 					}
-					return do_one_child(NewRefCountedFile(pdf), dest, st, true)
+					pdf_rcf := NewRefCountedFile(pdf)
+					result := do_one_child(pdf_rcf, dest, st, true)
+					pdf_rcf.Unref()
+					return result
 				} else {
 					target, err := ReadLinkAt(src.File(), child.Name())
 					if err != nil {
